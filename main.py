@@ -48,12 +48,17 @@ flags.DEFINE_string('csv_file', './data/mhealth_raw_data.csv', 'Path and name of
 flags.DEFINE_integer('federated_mode', 1, '1: Non-IID 10 subjects (no change from original dataset).  2: IID 10 subjects.  3: Centralized.')
 flags.DEFINE_float('sample_duration_in_msec', 2500.0, 'Duration of each data sample in msecs.')
 flags.DEFINE_float('test_data_size', 0.3, 'Portion of data allocated for test / validation.')
-flags.DEFINE_integer('median_window_size', 5, 'Smoothening of raw data.  1 for no filtering.')
+flags.DEFINE_integer('median_window_size', 10, 'Smoothening of raw data.  1 for no filtering.')
 
-def median_filter(df, target, window):
+def median_filter(df: pd.DataFrame, target: pd.DataFrame, window: int):
     median = df.rolling(window).median().reset_index(drop=True).drop(np.arange(window-1))
     target = target.reset_index(drop=True).drop(np.arange(window-1))
     return median, target
+
+def accuracy(confusion_matrix: np.ndarray):
+    diagonal_sum = confusion_matrix.trace()
+    sum_of_all_elements = confusion_matrix.sum()
+    return diagonal_sum / sum_of_all_elements
 
 class FederatedDataset(ABC):
     @abstractmethod
@@ -68,7 +73,7 @@ class FederatedDataset(ABC):
 
 class FederatedMHEALTHDataset(FederatedDataset):
     class MHEALTHDataset(Dataset):
-        def __init__(self, dataset:Tuple[np.ndarray, np.ndarray], transform: Callable=None):
+        def __init__(self, dataset: Tuple[np.ndarray, np.ndarray], transform: Callable=None):
             self.data, self.labels = dataset
             self.len = len(self.data)
             self.randomize_order = np.random.randint(low=self.len, size=self.len)
@@ -255,18 +260,34 @@ def main(argv: Sequence[str]) -> None:
     x_test = x_test.reshape(x_test.shape[0], -1)
 
     from sklearn.linear_model import LogisticRegression
-    C =1000
-    logistic_regression= LogisticRegression(max_iter=50000, C=C)
-    logistic_regression.fit(x_train,y_train)
-    y_pred=logistic_regression.predict(x_test)
+    # C =1000
+    # logistic_regression= LogisticRegression(max_iter=50000, C=C)
+    # logistic_regression.fit(x_train,y_train)
+    # y_pred=logistic_regression.predict(x_test)
+    # diff_vec = y_pred != y_test
+    # err = int(1000*sum(diff_vec)/len(y_pred))/10
+    # print("LogisticRegression: C", C, "error ", err, "%")   
+
+    from sklearn.neural_network import MLPClassifier
+    classifier = MLPClassifier(
+        hidden_layer_sizes=(75,100,25), 
+        max_iter=1000,
+        activation = 'relu',
+        solver='adam',
+        random_state=1
+    )
+    classifier.fit(x_train,y_train)
+    y_pred=classifier.predict(x_test)
     diff_vec = y_pred != y_test
     err = int(1000*sum(diff_vec)/len(y_pred))/10
-    print("LogisticRegression: C", C, "error", err, "%")   
+    print("MLPClassifier: error ", err, "%")   
 
-
-    embed()
-
-
+    #Importing Confusion Matrix
+    from sklearn.metrics import confusion_matrix
+    #Comparing the predictions against the actual observations in y_val
+    cm: np.ndarray = confusion_matrix(y_pred, y_test)
+    #Printing the accuracy
+    print("Accuracy of MLPClassifier : ", accuracy(cm))
 
 if __name__ == '__main__':
     app.run(main)
